@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WASM PNG Noise</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+      body {
+        height: 100vh;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5r;
+      }
+
+      @media (min-width: 768px) {
+        .container {
+          flex-direction: row;
+          gap: 1.5rem;
+        }
+      }
+
+      .canvas-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        border-radius: 0.75rem;
+      }
+
+      canvas {
+        width: 16rem;
+        height: 16rem;
+        border-radius: 0.5rem;
+      }
+
+      #image {
+        object-fit: contain;
+        width: 16rem;
+        height: 16rem;
+        border-radius: 0.5rem;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 flex items-center justify-center p-4">
+    <div class="container mx-auto bg-white rounded-xl shadow-lg p-6">
+      <!-- Left Panel: Canvas for Random Noise -->
+      <div class="canvas-container">
+        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+          Random Noise (Canvas)
+        </h2>
+        <canvas id="canvas"></canvas>
+        <p class="mt-4 text-gray-600 text-center">10x10 pixel random noise.</p>
+      </div>
+
+      <!-- Right Panel: Generated PNG Image -->
+      <div class="canvas-container">
+        <h2 class="text-2xl font-bold text-gray-800 mb-4">
+          Generated PNG (WASM)
+        </h2>
+        <img id="image" alt="Generated PNG Image" />
+        <p class="mt-4 text-gray-600 text-center">
+          PNG generated using WebAssembly (libpng).
+        </p>
+      </div>
+    </div>
+
+    <script src="png.js"></script>
+
+    <script>
+      const width = 10, height = 10;
+      const rgb = new Uint8Array(width * height * 3);
+
+      // Fill the buffer with random RGB values
+      for (let i = 0; i < rgb.length; i++) rgb[i] = Math.random() * 255;
+
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = width;
+      canvas.height = height;
+
+      const imgData = ctx.createImageData(width, height);
+      for (let i = 0; i < width * height; i++) {
+        imgData.data[i * 4 + 0] = rgb[i * 3 + 0];
+        imgData.data[i * 4 + 1] = rgb[i * 3 + 1];
+        imgData.data[i * 4 + 2] = rgb[i * 3 + 2];
+        imgData.data[i * 4 + 3] = 255;
+      }
+      ctx.putImageData(imgData, 0, 0);
+
+      // Call the WebAssembly module
+      createPNGModule().then((Module) => {
+
+         // Allocate memory in the WASM heap for the RGB data
+        const ptr = Module._malloc(rgb.length);
+
+        // Copy JS RGB data into WASM memory
+        Module.HEAPU8.set(rgb, ptr);
+
+        // Allocate memory to receive the output PNG size (4 bytes = 1 int)
+        const sizePtr = Module._malloc(4);
+
+        const pngPtr = Module._generate_png(ptr, width, height, sizePtr);
+
+        // Read the size of the generated PNG from the WASM heap
+        const size = Module.HEAP32[sizePtr >> 2];
+
+        if (size === 0) {
+          console.error("PNG generation failed");
+          return;
+        }
+
+        // Read the generated PNG data from WASM memory
+        const pngData = Module.HEAPU8.slice(pngPtr, pngPtr + size);
+        const blob = new Blob([pngData], { type: "image/png" });
+        document.getElementById("image").src = URL.createObjectURL(blob);
+
+        Module._free(ptr);
+        Module._free(sizePtr);
+      });
+    </script>
+  </body>
+</html>
